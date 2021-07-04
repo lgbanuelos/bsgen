@@ -128,9 +128,6 @@ def sample_with_replacement(log, no_traces):
     traces = [copy.deepcopy(random.choice(log)) for i in range(no_traces)]
     parameters = {log_converter.Variants.TO_EVENT_LOG.value.Parameters.CASE_ID_KEY: 'case'}
     df = pd.DataFrame(augment_events_prime(traces))
-
-    # print(df.head())
-
     new_log = log_converter.apply(df, parameters=parameters, variant=log_converter.Variants.TO_EVENT_LOG)
     return new_log
 
@@ -190,13 +187,14 @@ def BootstrapGeneralizationDataCollection(S, LS, LSM, PDT, EN, LEM, GM, K, p, No
                         (precision, recall) = g(mname, lstariname) 
                         re2.write(f"{system_name};{lstariname};{d.__name__};{g.__name__};")
                         re2.write(f"{k};{nog};{p};{m};{i};{precision};{recall}\n")
+                        os.remove(lstariname)
             re1.close()
             re2.close()
             return
 
 if __name__ == "__main__":
-    input_dir = '/home/ubuntu/data/nets'
-    output_dir = '/home/ubuntu/data/output'
+    input_dir = '/home/lgarcia/data/nets'
+    output_dir = '/home/lgarcia/data/output'
 
     Systems = random.choices([p for p in Path(input_dir).glob('*.pnml')], k = 50)
     print(len(Systems))
@@ -205,10 +203,10 @@ if __name__ == "__main__":
     # for s in Systems:
         pool.starmap(BootstrapGeneralizationDataCollection, [(
             s, 
-            [1_000], # [1_000,10_000], 
+            [50,100], 
             [simulate_petri_net], 
             [inductive], 
-            [1_000], 
+            [100], 
             [log_sample_with_breeding], 
             [entropia_coverage],
             [3, 5],
