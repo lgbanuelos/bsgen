@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from pm4py.algo.discovery.inductive import algorithm as inductive_miner
+from pm4py.algo.filtering.log.variants import variants_filter
 from pm4py.algo.simulation.playout.petri_net import algorithm as simulator
 from pm4py.objects.log.exporter.xes import exporter as xes_exporter
 from pm4py.objects.conversion.log import converter as log_converter
@@ -18,6 +19,7 @@ from pm4py.objects.petri_net.exporter.variants import pnml
 from pm4py.objects.petri_net.importer import importer as pnml_importer
 from pm4py.objects.petri_net.utils.initial_marking import discover_initial_marking
 from pm4py.util import constants
+
 
 def inductive(log):
     return inductive_miner.apply(log)
@@ -37,6 +39,11 @@ def simulate_petri_net(S, number_of_traces):
 def export_log(log, folder_name, system_name, qualifier, n):
     filename = os.path.join(folder_name, f'{system_name}_{qualifier}_{n}.xes')
     xes_exporter.apply(log, filename)
+    return filename
+
+def export_gzipped_log(log, folder_name, system_name, qualifier, n):
+    filename = os.path.join(folder_name, f'{system_name}_{qualifier}_{n}.xes.gz')
+    xes_exporter.apply(log, filename, parameters={"compress": True})
     return filename
 
 def export_net(model, folder_name, system_name, qualifier, n):
@@ -102,7 +109,6 @@ def crossover(t1, t2, n):
         return (0, 0)
     else:
         return random.choice(sites)
-    
 
 def log_estimation_with_breeding(L, Ln, l, p = 0.5):
     nL = []
@@ -123,6 +129,16 @@ def log_estimation_with_breeding(L, Ln, l, p = 0.5):
             nL.append(copy.deepcopy(t1))
             nL.append(copy.deepcopy(t2))
     return nL
+
+def dedup(log):
+    variants = variants_filter.get_variants(log)
+    unique_traces = []
+    for key in variants.keys():
+        unique_traces.append(variants[key][0])
+    new_log = EventLog(attributes=log.attributes, extensions=log.extensions, globals=log._omni,
+                       classifiers=log.classifiers, properties=log.properties)
+    new_log._list = unique_traces
+    return new_log
 
 def sample_with_replacement(log, no_traces):
     traces = [copy.deepcopy(random.choice(log)) for i in range(no_traces)]
@@ -146,12 +162,11 @@ def log_sample_with_breeding(log, number_of_generations, number_of_traces, k, p)
         
     return sample_with_replacement(logs, number_of_traces)
 
-def entropia_coverage(modelFilename, sysOrLogFilename):
-    # print(".... almost there")
-    stepOne = subprocess.check_output(['java', '-jar', 'jbpt-pm-entropia-1.6.jar', '-emr', '-t', f"-rel={sysOrLogFilename}",  f"-ret={modelFilename}"])
+def entropia_coverage(modelFilename, sysOrLogFilename, MAX_TIME = 300):
+    stepOne = subprocess.check_output(['java', '-jar', 'jbpt-pm-entropia-1.6.jar', '-emr', '-t', f"-rel={sysOrLogFilename}",  f"-ret={modelFilename}"], timeout=MAX_TIME)
     stepOne = stepOne.decode("utf-8").split('\n')
     print(stepOne[-1])
-    stepTwo = subprocess.check_output(['java', '-jar', 'jbpt-pm-entropia-1.6.jar', '-emp', '-t', f"-rel={sysOrLogFilename}",  f"-ret={modelFilename}"])
+    stepTwo = subprocess.check_output(['java', '-jar', 'jbpt-pm-entropia-1.6.jar', '-emp', '-t', f"-rel={sysOrLogFilename}",  f"-ret={modelFilename}"], timeout=MAX_TIME)
     stepTwo = stepTwo.decode("utf-8").split('\n')
     print(stepTwo[-1])
     try:
@@ -161,7 +176,7 @@ def entropia_coverage(modelFilename, sysOrLogFilename):
         cSM = cMS = 1
     return cSM, cMS
 
-def BootstrapGeneralizationDataCollection(S, LS, LSM, PDT, EN, LEM, GM, K, p, NoG, outdir = 'output'):
+def BootstrapGeneralizationDataCollection(S, LS, LSp, LSM, PDT, EN, LEM, GM, K, p, NoG, outdir = 'output'):
     # Set up
     system_name = S.stem
     folder_name = os.path.join(outdir, system_name)
@@ -176,17 +191,27 @@ def BootstrapGeneralizationDataCollection(S, LS, LSM, PDT, EN, LEM, GM, K, p, No
         for d in PDT:
             M = d(L) ; mname = export_net(M, folder_name, system_name, 'baseline', n)
             for g in GM:
-                (ms_precision, ms_recall) = g(mname, str(S))
-                (ml_precision, ml_recall) = g(mname, lname) 
-                re1.write(f"{system_name};{lname};{d.__name__};{g.__name__};{ms_precision};{ms_recall};{ml_precision};{ml_recall}\n")
+                try:
+                    (ms_precision, ms_recall) = g(mname, str(S))
+                    if ms_precision > 0.9 or ms_recall > 0.9:
+                        continue
+                    (ml_precision, ml_recall) = g(mname, lname)
+                    re1.write(f"{system_name};{lname};{d.__name__};{g.__name__};{ms_precision};{ms_recall};{ml_precision};{ml_recall}\n")
+                except:
+                    print(f"TIMEOUT: Computation of MSP/MSR for '{system_name}' was stopped after 5 minutes!")
 
-                for (m, lem, k, nog) in [(m, lem, k, nog) for m in EN for lem in LEM for k in K for nog in NoG]:
-                    for i in range(m):                        
-                        Lstari = lem(L,nog,n,k,p) ; lstariname = export_log(Lstari, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', n)
+                for (np, m, lem, k, nog) in [(np, m, lem, k, nog) for np in LSp for m in EN for lem in LEM for k in K for nog in NoG]:
+                    for i in range(m):
+                        Lstari = lem(L,nog,np,k,p) ; lstariname = export_log(Lstari, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
                         
-                        (precision, recall) = g(mname, lstariname) 
-                        re2.write(f"{system_name};{lstariname};{d.__name__};{g.__name__};")
-                        re2.write(f"{k};{nog};{p};{m};{i};{precision};{recall}\n")
+                        try:
+                            (precision, recall) = g(mname, lstariname)
+                            dlog = dedup(Lstari)
+                            re2.write(f"{system_name};{lstariname};{d.__name__};{g.__name__};")
+                            re2.write(f"{k};{nog};{p};{np};{m};{i};{len(dlog)};{precision};{recall}\n")
+                            export_gzipped_log(dlog, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
+                        except:
+                            pass
                         os.remove(lstariname)
             re1.close()
             re2.close()
@@ -196,33 +221,25 @@ if __name__ == "__main__":
     input_dir = '/home/lgarcia/data/nets'
     output_dir = '/home/lgarcia/data/output'
 
-    Systems = random.choices([p for p in Path(input_dir).glob('*.pnml')], k = 50)
+    Systems = random.choices([p for p in Path(input_dir).glob('*.pnml')], k = 5)
     print(len(Systems))
 
     with multiprocessing.Pool() as pool:
     # for s in Systems:
         pool.starmap(BootstrapGeneralizationDataCollection, [(
             s, 
-            [50,100], 
-            [simulate_petri_net], 
-            [inductive], 
-            [100], 
-            [log_sample_with_breeding], 
-            [entropia_coverage],
-            [3, 5],
-            1.0,
-            [5, 10],
+            [100],                      # LS    n
+            [100_000],                  # LSp   np
+            [simulate_petri_net],       # LSM   lsm
+            [inductive],                # PDT   d
+            [100],                      # EN    m
+            [log_sample_with_breeding], # LEM   lem
+            [entropia_coverage],        # GM
+            [2, 3],                     # k
+            1.0,                        # p
+            [1_000],                    # NoG
             output_dir
             ) for s in Systems])
-        # BootstrapGeneralizationDataCollection(
-        #     S = s, 
-        #     LS = [1_000], # [1_000,10_000], 
-        #     LSM = [simulate_petri_net], 
-        #     PDT = [inductive], 
-        #     EN = [1_000], 
-        #     LEM = [log_sample_with_breeding], 
-        #     GM = [entropia_coverage],
-        #     K = [3, 5],
-        #     p = 1.0,
-        #     NoG = [5, 10]
-        # )
+        # BootstrapGeneralizationDataCollection(S = s, LS = [1_000], LSM = [simulate_petri_net], 
+        #     PDT = [inductive], EN = [1_000], LEM = [log_sample_with_breeding], GM = [entropia_coverage],
+        #     K = [3, 5], p = 1.0, NoG = [5, 10] )
