@@ -192,27 +192,30 @@ def BootstrapGeneralizationDataCollection(S, LS, LSp, LSM, PDT, EN, LEM, GM, K, 
             M = d(L) ; mname = export_net(M, folder_name, system_name, 'baseline', n)
             for g in GM:
                 try:
-                    (ms_precision, ms_recall) = g(mname, str(S))
+                    (ms_precision, ms_recall) = g(mname, str(S), 1200)
                     if ms_precision > 0.9 or ms_recall > 0.9:
                         continue
-                    (ml_precision, ml_recall) = g(mname, lname)
+                    (ml_precision, ml_recall) = g(mname, lname, 1200)
                     re1.write(f"{system_name};{lname};{d.__name__};{g.__name__};{ms_precision};{ms_recall};{ml_precision};{ml_recall}\n")
+                    re1.flush()
                 except:
                     print(f"TIMEOUT: Computation of MSP/MSR for '{system_name}' was stopped after 5 minutes!")
 
-                for (np, m, lem, k, nog) in [(np, m, lem, k, nog) for np in LSp for m in EN for lem in LEM for k in K for nog in NoG]:
-                    for i in range(m):
-                        Lstari = lem(L,nog,np,k,p) ; lstariname = export_log(Lstari, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
+                #for (np, m, lem, k, nog) in [(np, m, lem, k, nog) for np in LSp for m in EN for lem in LEM for k in K for nog in NoG]:
+                #    for i in range(m):
+                #        Lstari = lem(L,nog,np,k,p) ; lstariname = export_log(Lstari, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
                         
-                        try:
-                            (precision, recall) = g(mname, lstariname)
-                            dlog = dedup(Lstari)
-                            re2.write(f"{system_name};{lstariname};{d.__name__};{g.__name__};")
-                            re2.write(f"{k};{nog};{p};{np};{m};{i};{len(dlog)};{precision};{recall}\n")
-                            export_gzipped_log(dlog, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
-                        except:
-                            pass
-                        os.remove(lstariname)
+                #        try:
+                #            dlog = dedup(Lstari)
+                #            #export_gzipped_log(dlog, folder_name, system_name, f'star_{nog}_{k}_{p}_{i}', np)
+                #            #(precision, recall) = g(mname, lstariname), 1200)
+                #            #re2.write(f"{system_name};{lstariname};{d.__name__};{g.__name__};")
+                #            #re2.write(f"{k};{nog};{p};{np};{m};{i};{len(dlog)};{precision};{recall}\n")
+                #            #re2.flush()
+                #        except:
+                #            print(f"TIMEOUT: Computation of MLP/MLR for '{system_name}' was stopped after 20 minutes!")
+                #            pass
+                #        # os.remove(lstariname)
             re1.close()
             re2.close()
             return
@@ -221,7 +224,8 @@ if __name__ == "__main__":
     input_dir = '/home/lgarcia/data/nets'
     output_dir = '/home/lgarcia/data/output'
 
-    Systems = random.choices([p for p in Path(input_dir).glob('*.pnml')], k = 5)
+    # Systems = random.choices([p for p in Path(input_dir).glob('*.pnml')], k = 5)
+    Systems =  [p for p in Path(input_dir).glob('*.pnml')]
     print(len(Systems))
 
     with multiprocessing.Pool() as pool:
@@ -229,15 +233,15 @@ if __name__ == "__main__":
         pool.starmap(BootstrapGeneralizationDataCollection, [(
             s, 
             [100],                      # LS    n
-            [100_000],                  # LSp   np
+            [100], # 100_000],                  # LSp   np
             [simulate_petri_net],       # LSM   lsm
             [inductive],                # PDT   d
             [100],                      # EN    m
             [log_sample_with_breeding], # LEM   lem
             [entropia_coverage],        # GM
-            [2, 3],                     # k
+            [2], # 3],                     # k
             1.0,                        # p
-            [1_000],                    # NoG
+            [10], # 1_000],                     NoG
             output_dir
             ) for s in Systems])
         # BootstrapGeneralizationDataCollection(S = s, LS = [1_000], LSM = [simulate_petri_net], 
